@@ -1,94 +1,65 @@
 from fastapi import FastAPI, Query
 import requests
-import feedparser
+import os
 from typing import Optional
 
-app = FastAPI()
+app = FastAPI(
+    title="Scopus Scientific Search API",
+    description="Búsqueda real de artículos indexados en Scopus (Elsevier)",
+    version="1.0.0"
+)
 
-@app.get("/search-and-draft")
-def search_and_draft(
+# 🔐 API Key desde variable de entorno
+SCOPUS_API_KEY = os.getenv("SCOPUS_API_KEY")
+
+SCOPUS_URL = "https://api.elsevier.com/content/search/scopus"
+
+@app.get("/scopus-search")
+def scopus_search(
     query: str = Query(..., description="Tema o palabras clave"),
-    language: Optional[str] = Query("es", description="Idioma (es o en)"),
-    maxResults: Optional[int] = Query(3, description="Número máximo de artículos")
+    maxResults: Optional[int] = Query(10, description="Número de resultados")
 ):
-    base_url = "http://export.arxiv.org/api/query"
-    params = {
-        "search_query": f"all:{query}",
-        "start": 0,
-        "max_results": maxResults,
-        "sortBy": "relevance",
-        "sortOrder": "descending"
+    if not SCOPUS_API_KEY:
+        return {"error": "API Key de Scopus no configurada"}
+
+    headers = {
+        "X-ELS-APIKey": SCOPUS_API_KEY,
+        "Accept": "application/json"
     }
 
-    response = requests.get(base_url, params=params)
-    feed = feedparser.parse(response.text)
+    params = {
+        "query": query,
+        "count": maxResults
+    }
+
+    response = requests.get(SCOPUS_URL, headers=headers, params=params)
+
+    if response.status_code != 200:
+        return {
+            "error": "Error al consultar Scopus",
+            "status_code": response.status_code,
+            "details": response.text
+        }
+
+    data = response.json()
+    entries = data.get("search-results", {}).get("entry", [])
 
     articles = []
-    for entry in feed.entries:
+
+    for entry in entries:
         articles.append({
-            "title": entry.title,
-            "summary": entry.summary,
-            "authors": [author.name for author in entry.authors],
-            "published": entry.published,
-            "source": "arXiv",
-            "link": entry.link
+            "title": entry.get("dc:title"),
+            "authors": entry.get("dc:creator"),
+            "year": entry.get("prism:coverDate", "")[:4],
+            "journal": entry.get("prism:publicationName"),
+            "doi": entry.get("prism:doi"),
+            "scopus_id": entry.get("dc:identifier"),
+            "link": entry.get("prism:url")
         })
-
-    if not articles:
-        return {"error": "No se encontraron artículos."}
-
-    # Redacción automática basada en artículos obtenidos
-    draft = f"### Redacción científica sobre: {query}
-
-"
-    draft += f"**Resumen**
-
-"
-    draft += f"Este artículo presenta una revisión de literatura sobre *{query}* utilizando fuentes open access indexadas como arXiv.
-
-"
-
-    draft += f"**Introducción**
-
-"
-    draft += f"La creciente relevancia del tema '{query}' ha motivado investigaciones recientes. A continuación, se resumen los hallazgos más relevantes.
-
-"
-
-    draft += f"**Metodología**
-
-"
-    draft += f"Se utilizó la API de arXiv para identificar publicaciones científicas recientes relacionadas con el tema '{query}'. Se seleccionaron los {len(articles)} artículos más relevantes.
-
-"
-
-    draft += f"**Resultados**
-
-"
-    for article in articles:
-        draft += f"- {article['title']} ({article['published'][:10]}) por {', '.join(article['authors'])}.
-  {article['summary'][:300]}...
-  Fuente: {article['link']}
-
-"
-
-    draft += f"**Discusión**
-
-"
-    draft += f"Los estudios encontrados destacan distintas perspectivas sobre '{query}'. Se observa una tendencia a enfocarse en aplicaciones prácticas y desarrollo de nuevas metodologías.
-
-"
-
-    draft += f"**Conclusiones**
-
-"
-    draft += f"Existe un creciente cuerpo de literatura científica open access que apoya la importancia del estudio de '{query}'. Futuras investigaciones deben considerar enfoques interdisciplinarios y colaborativos.
-
-"
 
     return {
         "query": query,
-        "language": language,
-        "results": articles,
-        "draft": draft
+        "total_results": len(articles),
+        "articles": articles
     }
+
