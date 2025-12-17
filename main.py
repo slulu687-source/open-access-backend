@@ -9,9 +9,6 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 🔐 API Key desde variable de entorno
-SCOPUS_API_KEY = os.getenv("SCOPUS_API_KEY")
-
 SCOPUS_URL = "https://api.elsevier.com/content/search/scopus"
 
 @app.get("/scopus-search")
@@ -19,11 +16,17 @@ def scopus_search(
     query: str = Query(..., description="Tema o palabras clave"),
     maxResults: Optional[int] = Query(10, description="Número de resultados")
 ):
-    if not SCOPUS_API_KEY:
-        return {"error": "API Key de Scopus no configurada"}
+    # 🔴 LEER LA VARIABLE AQUÍ, NO ARRIBA
+    scopus_api_key = os.getenv("SCOPUS_API_KEY")
+
+    if not scopus_api_key:
+        return {
+            "error": "API Key de Scopus no configurada",
+            "debug": "SCOPUS_API_KEY no encontrada en entorno"
+        }
 
     headers = {
-        "X-ELS-APIKey": SCOPUS_API_KEY,
+        "X-ELS-APIKey": scopus_api_key,
         "Accept": "application/json"
     }
 
@@ -45,7 +48,6 @@ def scopus_search(
     entries = data.get("search-results", {}).get("entry", [])
 
     articles = []
-
     for entry in entries:
         articles.append({
             "title": entry.get("dc:title"),
@@ -62,4 +64,5 @@ def scopus_search(
         "total_results": len(articles),
         "articles": articles
     }
+
 
